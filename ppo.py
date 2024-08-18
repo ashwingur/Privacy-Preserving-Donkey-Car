@@ -5,19 +5,68 @@ BUILT UPON THE TEMPLATE FROM:
     date: 13 October 2018
     notes: ppo2 test from stable-baselines here:
     https://github.com/hill-a/stable-baselines
+
+
+Got warren track working with the following params:
+    "max_cte": 10,
+    "steer_limit": 0.5,
+    "throttle_min": 0.1,
+    "throttle_max": 0.5,
+    60000 timesteps (could likely reduce this)
 """
 import argparse
 import uuid
+import os
+import shutil
 
 import gym
 from stable_baselines3 import PPO
 import gym_donkeycar
 import matplotlib.pyplot as plt
+from PIL import Image
+import imageio.v2 as imageio
+import cv2
 
 def show_observation(obs):
     plt.imshow(obs)
     plt.axis('off')  # Hide the axes for a cleaner image display
     plt.show()
+
+def save_frame(observation, id: int, images_array):
+    # Convert the observation (which is a NumPy array) to an image
+    image = Image.fromarray(observation)
+    image_path = f"frames/frame_{id:04d}.png"
+    image.save(image_path)
+    images_array.append(image_path)
+
+def generate_mp4_video(images_array, video_name='output_video.mp4', fps=30, scale_factor=2):
+    """
+    Create an MP4 video from a list of image file paths, upscaling each image using nearest-neighbor interpolation.
+
+    :param images_array: List of file paths to images.
+    :param video_name: Name of the output video file.
+    :param fps: Frames per second.
+    :param scale_factor: The factor by which to upscale the images.
+    """
+    if len(images_array) == 0:
+        print("No images provided")
+        return
+
+    # Read the first image to get the dimensions
+    first_image = imageio.imread(images_array[0])
+    height, width, layers = first_image.shape
+    new_height, new_width = height * scale_factor, width * scale_factor
+
+    video = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (new_width, new_height))
+
+    for image_file in images_array:
+        image = imageio.imread(image_file)
+        # Upscale using nearest-neighbor interpolation
+        upscaled_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+        video.write(cv2.cvtColor(upscaled_image, cv2.COLOR_RGB2BGR))  # Convert RGB to BGR for OpenCV
+
+    video.release()
+    print(f"Video saved as {video_name}")
 
 
 if __name__ == "__main__":
@@ -65,34 +114,44 @@ if __name__ == "__main__":
         "port": args.port,
         "body_style": "donkey",
         "body_rgb": (128, 128, 128),
-        "car_name": "brrr",
-        "font_size": 100,
+        "car_name": "pls work",
+        "font_size": 50,
         "racer_name": "PPO",
         "country": "USA",
         "bio": "Learning to drive w PPO RL",
         "guid": str(uuid.uuid4()),
         "max_cte": 10,
-        "steer_limit": 0.7,
+        "steer_limit": 0.5,
         "throttle_min": 0.1,
-        "throttle_max": 1.0,
+        "throttle_max": 0.5,
     }
 
     if args.test:
         # Make an environment test our trained policy
         env = gym.make(args.env_name, conf=conf)
 
-        model = PPO.load("ppo_donkey")
+        model = PPO.load(env_id)
+        images = []
+        image_folder = 'frames/'
+        # Clear the directory if it exists
+        if os.path.exists(image_folder):
+            shutil.rmtree(image_folder)
+        os.makedirs(image_folder, exist_ok=True)
 
         obs = env.reset()
-        for _ in range(1000):
+        for i in range(1000):
             # Display the observation
             # show_observation(obs)
 
             action, _states = model.predict(obs, deterministic=True)
             obs, reward, done, info = env.step(action)
+            save_frame(observation=obs, id=i, images_array=images )
             env.render()
             if done:
                 obs = env.reset()
+        # save_video(f"{env_id}-vid.mp4", images_array=images)
+        # print(images)
+        generate_mp4_video(images, f"{env_id}-vid.mp4")
 
         print("done testing")
 
@@ -104,10 +163,11 @@ if __name__ == "__main__":
         model = PPO("CnnPolicy", env, verbose=1)
 
         # set up model in learning mode with goal number of timesteps to complete
-        model.learn(total_timesteps=20000)
+        model.learn(total_timesteps=60000)
 
         obs = env.reset()
 
+        # We are not training in this loop, just testing
         for i in range(1000):
             action, _states = model.predict(obs, deterministic=True)
 
@@ -124,10 +184,10 @@ if __name__ == "__main__":
 
             if i % 100 == 0:
                 print("saving...")
-                model.save("ppo_donkey")
+                model.save(env_id)
 
         # Save the agent
-        model.save("ppo_donkey")
+        model.save(env_id)
         print("done training")
 
     env.close()
