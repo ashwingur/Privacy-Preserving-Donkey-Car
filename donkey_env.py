@@ -37,6 +37,7 @@ def supply_defaults(conf: Dict[str, Any]) -> None:
         ("steer_limit", 1.0),
         ("throttle_min", 0.0),
         ("throttle_max", 1.0),
+        ("privacy", False),
     ]
 
     for key, val in defaults:
@@ -77,6 +78,9 @@ class DonkeyEnv(gym.Env):
         logger.debug("DEBUG ON")
         logger.debug(conf)
 
+        self.is_privacy = conf["privacy"]
+        print(f"Donkey privacy set: {self.is_privacy}")
+
         # start Unity simulation subprocess
         self.proc = None
         if "exe_path" in conf:
@@ -100,7 +104,10 @@ class DonkeyEnv(gym.Env):
         )
 
         # camera sensor data
-        self.observation_space = spaces.Box(0, self.VAL_PER_PIXEL, self.viewer.get_sensor_size(), dtype=np.uint8)
+        if self.is_privacy:
+            self.observation_space = self.get_privacy_observation_space()
+        else:
+            self.observation_space = spaces.Box(0, self.VAL_PER_PIXEL, self.viewer.get_sensor_size(), dtype=np.uint8)
 
         # simulation related variables.
         self.seed()
@@ -110,6 +117,14 @@ class DonkeyEnv(gym.Env):
 
         # wait until the car is loaded in the scene
         self.viewer.wait_until_loaded()
+    
+    def get_privacy_observation_space(self) -> spaces.Box:
+        return spaces.Box(0, 255, (255, 255, 1), dtype=np.uint8)
+    
+    def observation_to_privacy_observation(self, observation: np.ndarray) -> np.ndarray:
+        # TODO implement privacy preserving logic, ensure it matches get_privacy_observation_space
+        return observation
+
 
     def __del__(self) -> None:
         self.close()
@@ -144,6 +159,11 @@ class DonkeyEnv(gym.Env):
         self.viewer.handler.send_control(0, 0, 1.0)
         time.sleep(0.1)
         observation, reward, done, info = self.viewer.observe()
+
+        # TODO, add privacy preserving logic here
+        if self.is_privacy:
+            observation = self.observation_to_privacy_observation(observation)
+
         return observation
 
     def render(self, mode: str = "human", close: bool = False) -> Optional[np.ndarray]:

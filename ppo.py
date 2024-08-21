@@ -96,6 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=9091, help="port to use for tcp")
     parser.add_argument("--test", action="store_true", help="load the trained model and play")
     parser.add_argument("--multi", action="store_true", help="start multiple sims at once")
+    parser.add_argument("--privacy", action="store_true", help="enable the privacy preserving filter")
     parser.add_argument(
         "--env_name", type=str, default="donkey-mountain-track-v0", help="name of donkey sim environment", choices=env_list
     )
@@ -106,7 +107,8 @@ if __name__ == "__main__":
         print("you must supply the sim path with --sim when running multiple environments")
         exit(1)
 
-    env_id = args.env_name
+    env_id = f"{args.env_name}{'_privacy' if args.privacy else ''}"
+
 
     conf = {
         "exe_path": args.sim,
@@ -124,6 +126,7 @@ if __name__ == "__main__":
         "steer_limit": 0.5,
         "throttle_min": 0.1,
         "throttle_max": 0.5,
+        "privacy": args.privacy, # Indicate whether privacy hashing is enabled
     }
 
     if args.test:
