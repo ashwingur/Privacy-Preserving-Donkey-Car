@@ -166,13 +166,14 @@ if __name__ == "__main__":
         model = PPO("CnnPolicy", env, verbose=1)
 
         # set up model in learning mode with goal number of timesteps to complete
-        model.learn(total_timesteps=60000)
+        model.learn(total_timesteps=30000)
 
         obs = env.reset()
 
         # We are not training in this loop, just testing
         for i in range(1000):
             action, _states = model.predict(obs, deterministic=True)
+            env.poop()
 
             obs, reward, done, info = env.step(action)
 
