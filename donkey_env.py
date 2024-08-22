@@ -8,7 +8,11 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import math
 import random
+import os
 import cv2
+from PIL import Image
+import imageio.v2 as imageio
+import shutil
 
 import gym
 import numpy as np
@@ -44,6 +48,7 @@ def supply_defaults(conf: Dict[str, Any]) -> None:
         ("throttle_min", 0.0),
         ("throttle_max", 1.0),
         ("privacy", False),
+        ("record", False),
     ]
 
     for key, val in defaults:
@@ -85,7 +90,17 @@ class DonkeyEnv(gym.Env):
         logger.debug(conf)
 
         self.is_privacy = conf["privacy"]
+        self.is_record = conf["record"]
         print(f"Donkey privacy set: {self.is_privacy}")
+        print(f"Recording enabled: {self.is_record}")
+
+        if self.is_record:
+            image_folders = ['frames/', 'privacy_frames/']
+            for image_folder in image_folders:
+                # Clear the directory if it exists
+                if os.path.exists(image_folder):
+                    shutil.rmtree(image_folder)
+                os.makedirs(image_folder, exist_ok=True)
 
         # start Unity simulation subprocess
         self.proc = None
@@ -123,14 +138,64 @@ class DonkeyEnv(gym.Env):
 
         # wait until the car is loaded in the scene
         self.viewer.wait_until_loaded()
+
+        self.frame_number = 0
+        self.images_array = []
+        self.privacy_images_array = []
     
     def poop(self):
         print("POOP")
+
+    def save_frame(self, observation, id: int):
+        # Convert the observation (which is a NumPy array) to an image
+        image = Image.fromarray(observation)
+        image_path = f"frames/frame_{id:04d}.png"
+        image.save(image_path)
+        self.images_array.append(image_path)
     
+    def save_privacy_frame(self, privacy_observation, id: int):
+        # print(privacy_observation)
+        # print(np.max(privacy_observation))
+        # Convert the observation (which is a NumPy array) to an image
+        image = Image.fromarray(np.squeeze(privacy_observation*20), mode="L")
+        image_path = f"privacy_frames/frame_{id:04d}.png"
+        image.save(image_path)
+        self.privacy_images_array.append(image_path)
+
+    
+    def generate_mp4_video(images_array, video_name='output_video.mp4', fps=30, scale_factor=2):
+        """
+        Create an MP4 video from a list of image file paths, upscaling each image using nearest-neighbor interpolation.
+
+        :param images_array: List of file paths to images.
+        :param video_name: Name of the output video file.
+        :param fps: Frames per second.
+        :param scale_factor: The factor by which to upscale the images.
+        """
+        if len(images_array) == 0:
+            print("No images provided")
+            return
+
+        # Read the first image to get the dimensions
+        first_image = imageio.imread(images_array[0])
+        height, width, layers = first_image.shape
+        new_height, new_width = height * scale_factor, width * scale_factor
+
+        video = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (new_width, new_height))
+        for image_file in images_array:
+            image = imageio.imread(image_file)
+            # Upscale using nearest-neighbor interpolation
+            upscaled_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+            video.write(cv2.cvtColor(upscaled_image, cv2.COLOR_RGB2BGR))  # Convert RGB to BGR for OpenCV
+
+        video.release()
+        print(f"Video saved as {video_name}")
+
+
     def get_privacy_observation_space(self) -> spaces.Box:
         return spaces.Box(0, 255, (256, 256, 1), dtype=np.uint8)
     
-    def observation_to_privacy_observation(self, observation: np.ndarray, samples=1) -> np.ndarray:
+    def observation_to_privacy_observation(self, observation: np.ndarray, samples=1000) -> np.ndarray:
         """
         Given a regular observation from the camera, convert it into a privacy preserving image hash
         """
@@ -149,7 +214,7 @@ class DonkeyEnv(gym.Env):
             # Add a cap for uint 8 (for now so we can render grayscale images, it shouldnt be necessary)
             image_hash[min_val, max_val] = min(image_hash[min_val, max_val] + 1, 255)
 
-        # plt.imshow(255 - image_hash, cmap='gray')
+        # plt.imshow(image_hash, cmap='gray')
         # plt.imshow(image_hash, cmap='hot', interpolation='nearest')
         # plt.colorbar()  # Add a colorbar to show the intensity scale
         # plt.title('Heatmap')
@@ -202,9 +267,13 @@ class DonkeyEnv(gym.Env):
         for _ in range(self.frame_skip):
             self.viewer.take_action(action)
             observation, reward, done, info = self.viewer.observe()
-        # TODO, add privacy preserving logic here
+
+        if self.is_record:
+            self.save_frame(observation, self.frame_number)
         if self.is_privacy:
             observation = self.observation_to_privacy_observation(observation)
+            self.save_privacy_frame(observation, self.frame_number)
+        self.frame_number += 1
 
         return observation, reward, done, info
 

@@ -39,7 +39,8 @@ def save_frame(observation, id: int, images_array):
     image.save(image_path)
     images_array.append(image_path)
 
-def generate_mp4_video(images_array, video_name='output_video.mp4', fps=30, scale_factor=2):
+
+def generate_mp4_video(images_array, video_name='output_video.mp4', fps=15, scale_factor=2):
     """
     Create an MP4 video from a list of image file paths, upscaling each image using nearest-neighbor interpolation.
 
@@ -54,19 +55,37 @@ def generate_mp4_video(images_array, video_name='output_video.mp4', fps=30, scal
 
     # Read the first image to get the dimensions
     first_image = imageio.imread(images_array[0])
-    height, width, layers = first_image.shape
+
+    # Determine if the image is grayscale or RGB
+    if len(first_image.shape) == 2:  # Grayscale image
+        height, width = first_image.shape
+        layers = 1
+    else:  # RGB image
+        height, width, layers = first_image.shape
+
     new_height, new_width = height * scale_factor, width * scale_factor
 
-    video = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (new_width, new_height))
+    # Initialize video writer with color enabled (3-channel output)
+    video = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (new_width, new_height), isColor=True)
 
     for image_file in images_array:
         image = imageio.imread(image_file)
-        # Upscale using nearest-neighbor interpolation
-        upscaled_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
-        video.write(cv2.cvtColor(upscaled_image, cv2.COLOR_RGB2BGR))  # Convert RGB to BGR for OpenCV
+        if len(image.shape) == 2:  # Grayscale
+            # Upscale grayscale image
+            upscaled_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+            # Convert grayscale to 3-channel by replicating the single channel
+            upscaled_image = cv2.cvtColor(upscaled_image, cv2.COLOR_GRAY2RGB)
+        else:
+            # Upscale RGB image
+            upscaled_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+            # Convert RGB to BGR for OpenCV
+            upscaled_image = cv2.cvtColor(upscaled_image, cv2.COLOR_RGB2BGR)
+
+        video.write(upscaled_image)
 
     video.release()
     print(f"Video saved as {video_name}")
+
 
 
 if __name__ == "__main__":
@@ -97,6 +116,7 @@ if __name__ == "__main__":
     parser.add_argument("--test", action="store_true", help="load the trained model and play")
     parser.add_argument("--multi", action="store_true", help="start multiple sims at once")
     parser.add_argument("--privacy", action="store_true", help="enable the privacy preserving filter")
+    parser.add_argument("--record", action="store_true", help="enable recording of frames")
     parser.add_argument(
         "--env_name", type=str, default="donkey-mountain-track-v0", help="name of donkey sim environment", choices=env_list
     )
@@ -127,6 +147,7 @@ if __name__ == "__main__":
         "throttle_min": 0.1,
         "throttle_max": 0.5,
         "privacy": args.privacy, # Indicate whether privacy hashing is enabled
+        "record": args.record, # If we should be recording the frames (to view the observations)
     }
 
     if args.test:
@@ -148,13 +169,13 @@ if __name__ == "__main__":
 
             action, _states = model.predict(obs, deterministic=True)
             obs, reward, done, info = env.step(action)
-            save_frame(observation=obs, id=i, images_array=images )
+            # save_frame(observation=obs, id=i, images_array=images )
             env.render()
             if done:
                 obs = env.reset()
         # save_video(f"{env_id}-vid.mp4", images_array=images)
         # print(images)
-        generate_mp4_video(images, f"{env_id}-vid.mp4")
+        # generate_mp4_video(images, f"{env_id}-vid.mp4")
 
         print("done testing")
 
@@ -166,14 +187,23 @@ if __name__ == "__main__":
         model = PPO("CnnPolicy", env, verbose=1)
 
         # set up model in learning mode with goal number of timesteps to complete
-        model.learn(total_timesteps=30000)
+        try:
+            model.learn(total_timesteps=30000)
+        except KeyboardInterrupt:
+            if args.record:
+                images = sorted([f"frames/{f}" for f in os.listdir("frames") if os.path.isfile(os.path.join("frames", f))])
+                generate_mp4_video(images, f"{env_id}_real_image-vid.mp4")
+                images = sorted([f"privacy_frames/{f}" for f in os.listdir("privacy_frames") if os.path.isfile(os.path.join("privacy_frames", f))])
+                generate_mp4_video(images, f"{env_id}-vid.mp4")
+            env.close()
+            exit()
 
         obs = env.reset()
 
         # We are not training in this loop, just testing
         for i in range(1000):
             action, _states = model.predict(obs, deterministic=True)
-            env.poop()
+            # env.poop()
 
             obs, reward, done, info = env.step(action)
 
