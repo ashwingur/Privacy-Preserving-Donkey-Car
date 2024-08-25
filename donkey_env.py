@@ -86,6 +86,9 @@ class DonkeyEnv(gym.Env):
         # set logging level
         logging.basicConfig(level=conf["log_level"])
 
+        # Bin size for privacy histogram
+        self.bin_size = 4
+
         logger.debug("DEBUG ON")
         logger.debug(conf)
 
@@ -193,24 +196,24 @@ class DonkeyEnv(gym.Env):
 
 
     def get_privacy_observation_space(self) -> spaces.Box:
-        return spaces.Box(0, 255, (256, 256, 1), dtype=np.uint8)
+        return spaces.Box(0, 255, (256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
     
-    def observation_to_privacy_observation(self, observation: np.ndarray, samples=1000) -> np.ndarray:
+    def observation_to_privacy_observation(self, observation: np.ndarray, samples=2000) -> np.ndarray:
         """
         Given a regular observation from the camera, convert it into a privacy preserving image hash
         """
         # TODO implement privacy preserving logic, ensure it matches get_privacy_observation_space
-        image_hash = np.zeros((256, 256, 1), dtype=np.uint8)
+        image_hash = np.zeros((256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
 
         # Convert observation to grayscale
         gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
         gray_image = gray_image.astype(np.uint8)
 
         for _ in range(samples):
-            circle_points = self.generate_circular_points(160, 120, min_radius=5, max_radius=10, num_points=100)
+            circle_points = self.generate_circular_points(160, 120, min_radius=10, max_radius=10, num_points=100)
             pixel_values = np.array([gray_image[y,x] for x,y in circle_points])
-            min_val = np.min(pixel_values)
-            max_val = np.max(pixel_values)
+            min_val = np.min(pixel_values)//self.bin_size
+            max_val = np.max(pixel_values)//self.bin_size
             # Add a cap for uint 8 (for now so we can render grayscale images, it shouldnt be necessary)
             image_hash[min_val, max_val] = min(image_hash[min_val, max_val] + 1, 255)
 
