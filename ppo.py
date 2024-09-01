@@ -129,6 +129,9 @@ if __name__ == "__main__":
 
     env_id = f"{args.env_name}{'_privacy' if args.privacy else ''}"
 
+    IMAGE_WIDTH = 360
+    IMAGE_HEIGHT = 240
+
 
     conf = {
         "exe_path": args.sim,
@@ -136,7 +139,7 @@ if __name__ == "__main__":
         "port": args.port,
         "body_style": "donkey",
         "body_rgb": (128, 128, 128),
-        "car_name": "pls work",
+        "car_name": "very fast car",
         "font_size": 50,
         "racer_name": "PPO",
         "country": "USA",
@@ -144,10 +147,16 @@ if __name__ == "__main__":
         "guid": str(uuid.uuid4()),
         "max_cte": 10,
         "steer_limit": 0.5,
-        "throttle_min": 0.1,
-        "throttle_max": 0.5,
+        "throttle_min": 0.2,
+        "throttle_max": 0.3,
         "privacy": args.privacy, # Indicate whether privacy hashing is enabled
         "record": args.record, # If we should be recording the frames (to view the observations)
+        # Modify the camera resolution
+        "cam_config": {
+            "img_w": IMAGE_WIDTH,
+            "img_h": IMAGE_HEIGHT
+        },
+        "cam_resolution": (IMAGE_HEIGHT, IMAGE_WIDTH, 3),
     }
 
     if args.test:
@@ -184,11 +193,11 @@ if __name__ == "__main__":
         env = gym.make(args.env_name, conf=conf)
 
         # create cnn policy
-        model = PPO("CnnPolicy", env, verbose=1)
+        model = PPO("CnnPolicy", env, verbose=1, tensorboard_log=f"./log/{env_id}/", n_steps=1024)
 
         # set up model in learning mode with goal number of timesteps to complete
         try:
-            model.learn(total_timesteps=30000)
+            model.learn(total_timesteps=50000)
         except KeyboardInterrupt:
             if args.record:
                 images = sorted([f"frames/{f}" for f in os.listdir("frames") if os.path.isfile(os.path.join("frames", f))])
@@ -223,5 +232,7 @@ if __name__ == "__main__":
         # Save the agent
         model.save(env_id)
         print("done training")
+
+    env.plot_xy(f"xy/{env_id}_{'test' if args.test else 'train'}.png")
 
     env.close()
