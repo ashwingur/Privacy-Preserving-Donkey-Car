@@ -145,6 +145,21 @@ class DonkeyEnv(gym.Env):
         self.frame_number = 0
         self.images_array = []
         self.privacy_images_array = []
+        self.x_positions = []
+        self.z_positions = []
+
+    def plot_xy(self, fig_name: str):
+        """
+        Creates a scatter plot of the X,Y coordinates of a training/testing run and saves it to a file.
+        """
+        plt.scatter(self.x_positions, self.z_positions, color='blue', marker='o', s=10)
+
+        plt.xlabel('X position (m)')
+        plt.ylabel('Y position (m)')
+
+        plt.savefig(fig_name, format='png')
+        print(f"XY data plotted and saved to {fig_name}")
+        plt.close()
     
     def poop(self):
         print("POOP")
@@ -270,13 +285,20 @@ class DonkeyEnv(gym.Env):
         for _ in range(self.frame_skip):
             self.viewer.take_action(action)
             observation, reward, done, info = self.viewer.observe()
-
+        
         if self.is_record:
             self.save_frame(observation, self.frame_number)
         if self.is_privacy:
             observation = self.observation_to_privacy_observation(observation)
             self.save_privacy_frame(observation, self.frame_number)
         self.frame_number += 1
+
+        # Log the x,y positions so we can plot later if needed
+        self.x_positions.append(self.viewer.handler.x)
+        self.z_positions.append(self.viewer.handler.z)
+
+        # Adding in a fake delay to simulate long processing time (remove later)
+        time.sleep(0.11)
 
         return observation, reward, done, info
 

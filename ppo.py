@@ -120,8 +120,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--env_name", type=str, default="donkey-mountain-track-v0", help="name of donkey sim environment", choices=env_list
     )
-
+    parser.add_argument(
+        "--log_name",
+        type=str,
+        help="custom name for the TensorBoard logging run"
+    )
     args = parser.parse_args()
+
+    # Check if --log_name is required
+    if not args.test and not args.log_name:
+        parser.error("--log_name is required for training. If you are testing add the --test flag.")
 
     if args.sim == "sim_path" and args.multi:
         print("you must supply the sim path with --sim when running multiple environments")
@@ -129,8 +137,8 @@ if __name__ == "__main__":
 
     env_id = f"{args.env_name}{'_privacy' if args.privacy else ''}"
 
-    IMAGE_WIDTH = 360
-    IMAGE_HEIGHT = 240
+    IMAGE_WIDTH = 256
+    IMAGE_HEIGHT = 256
 
 
     conf = {
@@ -172,7 +180,7 @@ if __name__ == "__main__":
         os.makedirs(image_folder, exist_ok=True)
 
         obs = env.reset()
-        for i in range(1000):
+        for i in range(150):
             # Display the observation
             # show_observation(obs)
 
@@ -193,11 +201,11 @@ if __name__ == "__main__":
         env = gym.make(args.env_name, conf=conf)
 
         # create cnn policy
-        model = PPO("CnnPolicy", env, verbose=1, tensorboard_log=f"./log/{env_id}/", n_steps=1024)
+        model = PPO("CnnPolicy", env, verbose=1, tensorboard_log=f"./log/{env_id}/", n_steps=2048)
 
         # set up model in learning mode with goal number of timesteps to complete
         try:
-            model.learn(total_timesteps=50000)
+            model.learn(total_timesteps=45000, tb_log_name=args.log_name)
         except KeyboardInterrupt:
             if args.record:
                 images = sorted([f"frames/{f}" for f in os.listdir("frames") if os.path.isfile(os.path.join("frames", f))])
@@ -210,7 +218,7 @@ if __name__ == "__main__":
         obs = env.reset()
 
         # We are not training in this loop, just testing
-        for i in range(1000):
+        for i in range(500):
             action, _states = model.predict(obs, deterministic=True)
             # env.poop()
 
