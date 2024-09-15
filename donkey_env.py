@@ -152,13 +152,18 @@ class DonkeyEnv(gym.Env):
         """
         Creates a scatter plot of the X,Y coordinates of a training/testing run and saves it to a file.
         """
-        plt.scatter(self.x_positions, self.z_positions, color='blue', marker='o', s=10)
+        plt.scatter(self.x_positions, self.z_positions, color='blue', marker='o', s=5)
 
         plt.xlabel('X position (m)')
         plt.ylabel('Y position (m)')
 
         plt.savefig(fig_name, format='png')
         print(f"XY data plotted and saved to {fig_name}")
+
+        # Save as EPS
+        plt.savefig(f"{fig_name}.eps", format='eps')
+        print(f"XY data plotted and saved to {fig_name}.eps")
+
         plt.close()
     
     def poop(self):
@@ -213,32 +218,55 @@ class DonkeyEnv(gym.Env):
     def get_privacy_observation_space(self) -> spaces.Box:
         return spaces.Box(0, 255, (256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
     
-    def observation_to_privacy_observation(self, observation: np.ndarray, samples=2000) -> np.ndarray:
+    # def observation_to_privacy_observation(self, observation: np.ndarray, samples=3000) -> np.ndarray:
+    #     """
+    #     Given a regular observation from the camera, convert it into a privacy preserving image hash
+    #     """
+    #     image_hash = np.zeros((256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
+
+    #     # Convert observation to grayscale
+    #     gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
+    #     gray_image = gray_image.astype(np.uint8)
+
+    #     for _ in range(samples):
+    #         circle_points = self.generate_circular_points(256, 256, min_radius=10, max_radius=10, num_points=100)
+    #         pixel_values = np.array([gray_image[y,x] for x,y in circle_points])
+    #         min_val = np.min(pixel_values)//self.bin_size
+    #         max_val = np.max(pixel_values)//self.bin_size
+    #         # Add a cap for uint 8 (for now so we can render grayscale images, it shouldnt be necessary)
+    #         image_hash[min_val, max_val] = min(image_hash[min_val, max_val] + 1, 255)
+
+    #     return image_hash
+    
+    def observation_to_privacy_observation(self, observation: np.ndarray) -> np.ndarray:
         """
-        Given a regular observation from the camera, convert it into a privacy preserving image hash
+        Privacy hash function where we get the min and max value in every patch
         """
-        # TODO implement privacy preserving logic, ensure it matches get_privacy_observation_space
         image_hash = np.zeros((256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
 
         # Convert observation to grayscale
         gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
         gray_image = gray_image.astype(np.uint8)
+        # 64 for 256px image
+        reshaped_array = gray_image.reshape(128, 4, 128, 4)
 
-        for _ in range(samples):
-            circle_points = self.generate_circular_points(160, 120, min_radius=10, max_radius=10, num_points=100)
-            pixel_values = np.array([gray_image[y,x] for x,y in circle_points])
-            min_val = np.min(pixel_values)//self.bin_size
-            max_val = np.max(pixel_values)//self.bin_size
-            # Add a cap for uint 8 (for now so we can render grayscale images, it shouldnt be necessary)
-            image_hash[min_val, max_val] = min(image_hash[min_val, max_val] + 1, 255)
+        min_values = reshaped_array.min(axis=(1, 3)) // self.bin_size
+        max_values = reshaped_array.max(axis=(1, 3)) // self.bin_size
 
-        # plt.imshow(image_hash, cmap='gray')
-        # plt.imshow(image_hash, cmap='hot', interpolation='nearest')
-        # plt.colorbar()  # Add a colorbar to show the intensity scale
-        # plt.title('Heatmap')
-        # plt.xlabel('Max intensity')
-        # plt.ylabel('Min intensity')
-        # plt.show()
+        # np.set_printoptions(threshold=np.inf)
+        # print(min_values)
+        # np.savetxt('min.txt', min_values, fmt='%d')  # '%d' for integers, adjust formatting as needed
+        # np.savetxt('max.txt', max_values, fmt='%d')  # '%d' for integers, adjust formatting as needed
+
+        # print(max_values)
+        # print()
+        # exit()
+
+        for min_val, max_val in zip(min_values.ravel(), max_values.ravel()):
+            image_hash[min_val, max_val] += 1
+        
+        # for pixel in np.nditer(gray_image):
+        #     image_hash[pixel//self.bin_size, pixel//self.bin_size] += 1
 
         return image_hash
 
@@ -290,7 +318,8 @@ class DonkeyEnv(gym.Env):
             self.save_frame(observation, self.frame_number)
         if self.is_privacy:
             observation = self.observation_to_privacy_observation(observation)
-            self.save_privacy_frame(observation, self.frame_number)
+            if self.is_record:
+                self.save_privacy_frame(observation, self.frame_number)
         self.frame_number += 1
 
         # Log the x,y positions so we can plot later if needed
@@ -298,7 +327,7 @@ class DonkeyEnv(gym.Env):
         self.z_positions.append(self.viewer.handler.z)
 
         # Adding in a fake delay to simulate long processing time (remove later)
-        time.sleep(0.11)
+        # time.sleep(0.11)
 
         return observation, reward, done, info
 
@@ -308,7 +337,7 @@ class DonkeyEnv(gym.Env):
         time.sleep(0.1)
         self.viewer.reset()
         self.viewer.handler.send_control(0, 0, 1.0)
-        time.sleep(0.1)
+        time.sleep(0.2)
         observation, reward, done, info = self.viewer.observe()
 
         # TODO, add privacy preserving logic here

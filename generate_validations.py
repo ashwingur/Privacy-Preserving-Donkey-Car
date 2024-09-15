@@ -7,12 +7,11 @@ def patch_hash(image: np.ndarray, bin_size: int, height: int, width: int, patch_
     Privacy hash function where we get the min and max value in every patch
     Assume the input image is already monochrome
     """
-    image_hash = np.zeros((256//bin_size, 256//bin_size, 1), dtype=np.uint8)
+    image_hash = np.zeros((256//bin_size, 256//bin_size, 1), dtype=np.uint16)
 
-    # Convert observation to grayscale
-    # 64 for 256px image
-    # 128 for 512
+    # Reshape so its faster to calculate the min and max in each patch
     reshaped_array = image.reshape(height//patch_size, patch_size, width//patch_size, patch_size)
+
 
     min_values = reshaped_array.min(axis=(1, 3)) // bin_size
     max_values = reshaped_array.max(axis=(1, 3)) // bin_size
@@ -23,14 +22,32 @@ def patch_hash(image: np.ndarray, bin_size: int, height: int, width: int, patch_
     return image_hash
 
 
-def save_image(image: np.ndarray, name: str) -> None:
+def save_image(image: np.ndarray, name: str, upscale_factor: int = 1) -> None:
+    """
+    Save an image after normalizing it to the range 0-255.
+    
+    Optionally upscale the image by a given factor.
+    
+    Parameters:
+    - image: np.ndarray, the input image array.
+    - name: str, the name of the saved image file.
+    - upscale_factor: int, the factor by which to upscale the image (default is 1, no upscaling).
+    """
     # Normalize the image to the range 0-255 if it's not already in that range
     if np.max(image) != 0:  # Avoid division by zero if the max value is 0
         image = (image - np.min(image)) / (np.max(image) - np.min(image)) * 255
         image = image.astype(np.uint8)  # Convert to uint8 after normalization
 
-    # Convert the normalized array to an image and save it
+    # Convert the normalized array to a PIL image
     image = Image.fromarray(np.squeeze(image), mode="L")
+
+    # Upscale the image if upscale_factor is greater than 1
+    if upscale_factor > 1:
+        width, height = image.size
+        new_size = (width * upscale_factor, height * upscale_factor)
+        image = image.resize(new_size, Image.NEAREST)  # Use nearest neighbor interpolation for upscaling
+
+    # Save the image
     image_path = f"{name}.png"
     image.save(image_path)
 
@@ -54,13 +71,25 @@ def create_gradient_image(height):
     gradient = np.linspace(0, 255, height, dtype=np.uint8)
     return np.tile(gradient, (height, 1))
 
+def load_rgb_image(filepath) -> np.ndarray:
+    """Load an RGB image and convert it to a grayscale NumPy array (0-255)."""
+    # Load the image
+    image = Image.open(filepath)
+    
+    # Convert the image to grayscale
+    grayscale_image = image.convert("L")  # "L" mode is for grayscale
+    
+    # Convert the grayscale image to a NumPy array
+    grayscale_array = np.array(grayscale_image, dtype=np.uint8)
+    
+    return grayscale_array
+
 def process_and_save_image(image: np.ndarray, image_name, bin_size):
     """Generate patch hash and save the image and its hash."""
     image_patch_hash = patch_hash(image, bin_size, patch_size=4, height=image.shape[0], width=image.shape[1])
-    np.savetxt(f"{image_name}.txt", np.squeeze(image_patch_hash), fmt="%d")
-    # print(image_patch_hash)
+    # np.savetxt(f"{image_name}.txt", np.squeeze(image_patch_hash), fmt="%d")
     save_image(image, image_name)
-    save_image(image_patch_hash, f"{image_name}_patch_hash")
+    save_image(image_patch_hash, f"{image_name}_patch_hash", upscale_factor=8)
 
 def create_random_noise_image(height, width, noise_range=(0, 255)):
     """
@@ -107,9 +136,9 @@ def create_perlin_noise_image(height, width, scale=100, octaves=6, persistence=0
     return perlin_noise_normalized
 
 if __name__ == "__main__":
-    HEIGHT = 256
-    WIDTH = 256
-    BIN_SIZE = 4
+    HEIGHT = 512
+    WIDTH = 512
+    BIN_SIZE = 2
 
     # Fully black image
     black_image = create_black_image(HEIGHT)
@@ -134,5 +163,13 @@ if __name__ == "__main__":
     # Create and save Perlin noise image
     perlin_noise_image = create_perlin_noise_image(HEIGHT, WIDTH)
     process_and_save_image(perlin_noise_image, "perlin_noise", BIN_SIZE)
+
+    # Load a camera frame
+    camera_image = load_rgb_image("frame_0016.png")
+    process_and_save_image(camera_image, "frame_0016_", BIN_SIZE)
+
+    # IRL image of a home
+    camera_image = load_rgb_image("home.jpg")
+    process_and_save_image(camera_image, "home_", BIN_SIZE)
     
 
