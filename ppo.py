@@ -180,7 +180,7 @@ if __name__ == "__main__":
         os.makedirs(image_folder, exist_ok=True)
 
         obs = env.reset()
-        for i in range(150):
+        for i in range(500):
             # Display the observation
             # show_observation(obs)
 
@@ -193,6 +193,12 @@ if __name__ == "__main__":
         # save_video(f"{env_id}-vid.mp4", images_array=images)
         # print(images)
         # generate_mp4_video(images, f"{env_id}-vid.mp4")
+        if args.record:
+            images = sorted([f"frames/{f}" for f in os.listdir("frames") if os.path.isfile(os.path.join("frames", f))])
+            generate_mp4_video(images, f"{env_id}_real_image-vid.mp4")
+            if args.privacy:
+                images = sorted([f"privacy_frames/{f}" for f in os.listdir("privacy_frames") if os.path.isfile(os.path.join("privacy_frames", f))])
+                generate_mp4_video(images, f"{env_id}-vid.mp4")
 
         print("done testing")
 
@@ -205,7 +211,7 @@ if __name__ == "__main__":
 
         # set up model in learning mode with goal number of timesteps to complete
         try:
-            model.learn(total_timesteps=45000, tb_log_name=args.log_name)
+            model.learn(total_timesteps=55000, tb_log_name=args.log_name)
         except KeyboardInterrupt:
             if args.record:
                 images = sorted([f"frames/{f}" for f in os.listdir("frames") if os.path.isfile(os.path.join("frames", f))])
@@ -218,7 +224,7 @@ if __name__ == "__main__":
         obs = env.reset()
 
         # We are not training in this loop, just testing
-        for i in range(500):
+        for i in range(200):
             action, _states = model.predict(obs, deterministic=True)
             # env.poop()
 

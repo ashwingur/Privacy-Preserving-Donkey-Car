@@ -10,7 +10,7 @@ def main(folder_path: str):
     data_dict = defaultdict(lambda: {'Wall Time': None, 'Step': None})
 
     # Iterate through the summary events and extract required data
-    for e in tf.compat.v1.train.summary_iterator("log/donkey-warren-track-v0/PPO_1/events.out.tfevents.1724575746.ashwin.19448.0"):
+    for e in tf.compat.v1.train.summary_iterator("log/donkey-warren-track-v0_privacy/4x4_quadrant_minmax_2/events.out.tfevents.1725530113.ashwin.46278.0"):
         wall_time = e.wall_time
         step = e.step
         for v in e.summary.value:
@@ -32,6 +32,10 @@ def main(folder_path: str):
 
     # Define the CSV file path
     csv_file_path = os.path.join(folder_path, 'data.csv')
+    
+    # Create the folder if it doesn't exist
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
 
     # Write the data to a CSV file
     with open(csv_file_path, mode='w', newline='') as file:
@@ -44,9 +48,6 @@ def main(folder_path: str):
 
     print(f"Data has been successfully saved to {csv_file_path}")
 
-    # Create the folder if it doesn't exist
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
 
     # Prepare the figure for subplots
     num_plots = len(all_tags) - 2  # Excluding 'Wall Time' and 'Step'
@@ -75,12 +76,15 @@ def main(folder_path: str):
             plt.plot(steps, values, label=tag)
             plt.xlabel('Step')
             plt.ylabel('Value')
-            plt.title(f'{tag} over Steps')
+            # plt.title(f'{tag} over Steps')
             plt.legend()
 
             # Save the plot as a PNG file
             plot_file_path = os.path.join(folder_path, f"{tag.replace('/', '_')}.png")
             plt.savefig(plot_file_path)
+            # Save as an EPS file
+            plot_file_path = os.path.join(folder_path, f"{tag.replace('/', '_')}.eps")
+            plt.savefig(plot_file_path, format='eps')
             plt.close()
 
             # Add to subplot for combined image

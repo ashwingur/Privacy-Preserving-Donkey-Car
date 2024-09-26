@@ -176,11 +176,14 @@ class DonkeyEnv(gym.Env):
         image.save(image_path)
         self.images_array.append(image_path)
     
-    def save_privacy_frame(self, privacy_observation, id: int):
-        # print(privacy_observation)
-        # print(np.max(privacy_observation))
+    def save_privacy_frame(self, privacy_observation: np.ndarray, id: int):
         # Convert the observation (which is a NumPy array) to an image
-        image = Image.fromarray(np.squeeze(privacy_observation*20), mode="L")
+            # Normalize the image to the range 0-255 if it's not already in that range
+        if np.max(privacy_observation) != 0:  # Avoid division by zero if the max value is 0
+            privacy_observation = (privacy_observation - np.min(privacy_observation)) / (np.max(privacy_observation) - np.min(privacy_observation)) * 255
+            privacy_observation = privacy_observation.astype(np.uint8)  # Convert to uint8 after normalization
+
+        image = Image.fromarray(np.squeeze(privacy_observation*1), mode="L")
         image_path = f"privacy_frames/frame_{id:04d}.png"
         image.save(image_path)
         self.privacy_images_array.append(image_path)
@@ -218,9 +221,35 @@ class DonkeyEnv(gym.Env):
     def get_privacy_observation_space(self) -> spaces.Box:
         return spaces.Box(0, 255, (256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
     
+
+    # def get_privacy_observation_space(self) -> spaces.Box:
+    #     # Greyscale test
+    #     return spaces.Box(0, 255, (256, 256, 1), dtype=np.uint8)
+    
+    # def observation_to_privacy_observation(self, observation: np.ndarray, samples=3000) -> np.ndarray:
+    #     """
+    #     Grayscale test
+    #     """
+
+    #     # gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
+    #     # gray_image = np.expand_dims(gray_image.astype(np.uint8), axis=-1)
+
+    #     # print(gray_image.shape)
+    #     # return np.expand_dims(observation[:, :, 0], axis=-1)
+    #     image = Image.fromarray(observation).convert("L")
+
+    #     g = np.expand_dims(np.array(image), axis=-1) 
+
+    #     # plt.imshow(g, cmap='gray')  # Set color map to 'gray' for grayscale
+    #     # plt.axis('off')  # Optional: turn off axis labels and ticks
+    #     # plt.show()
+        
+    #     return g
+    
     # def observation_to_privacy_observation(self, observation: np.ndarray, samples=3000) -> np.ndarray:
     #     """
     #     Given a regular observation from the camera, convert it into a privacy preserving image hash
+    #     Circle hash function
     #     """
     #     image_hash = np.zeros((256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
 
@@ -242,13 +271,15 @@ class DonkeyEnv(gym.Env):
         """
         Privacy hash function where we get the min and max value in every patch
         """
-        image_hash = np.zeros((256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
+        length = 256
+        patch_size = 8
+        image_hash = np.zeros((length//self.bin_size, length//self.bin_size, 1), dtype=np.uint16)
 
         # Convert observation to grayscale
         gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
         gray_image = gray_image.astype(np.uint8)
         # 64 for 256px image
-        reshaped_array = gray_image.reshape(128, 4, 128, 4)
+        reshaped_array = gray_image.reshape(length//patch_size, patch_size, length//patch_size, patch_size)
 
         min_values = reshaped_array.min(axis=(1, 3)) // self.bin_size
         max_values = reshaped_array.max(axis=(1, 3)) // self.bin_size
