@@ -1,6 +1,7 @@
 import numpy as np
 from PIL import Image
 import noise
+from scipy import ndimage
 
 def patch_hash(image: np.ndarray, bin_size: int, height: int, width: int, patch_size: int) -> np.ndarray:
     """
@@ -21,25 +22,89 @@ def patch_hash(image: np.ndarray, bin_size: int, height: int, width: int, patch_
 
     return image_hash
 
+def gradient_blocks_hash(grayscale_image: np.ndarray, block_size: int = 8):
+    """
+    Compute the gradient magnitude and angle in each block of the image.
+    
+    Parameters:
+    - grayscale_image: np.ndarray, the grayscale version of the image.
+    - block_size: int, the size of the blocks (default is 4x4).
+    
+    Returns:
+    - block_gradients: np.ndarray, the summarized gradient magnitudes for each block.
+    - block_angles: np.ndarray, the summarized gradient angles for each block.
+    """
+    
+    # Compute the gradient in the x and y directions using Sobel operator
+    sobel_x = ndimage.sobel(grayscale_image, axis=0)  # Gradient in the x-direction
+    sobel_y = ndimage.sobel(grayscale_image, axis=1)  # Gradient in the y-direction
+    
+    # Compute the gradient magnitude and angle
+    gradient_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+    gradient_angle = np.arctan2(sobel_y, sobel_x)  # Gradient angle in radians
+    
+    # Initialize lists to store block-level gradient summaries
+    block_gradients = []
+    block_angles = []
+    
+    # Split the image into blocks and compute the summary of each block
+    for i in range(0, grayscale_image.shape[0], block_size):
+        for j in range(0, grayscale_image.shape[1], block_size):
+            # Extract the block for magnitude and angle
+            block_magnitude = gradient_magnitude[i:i+block_size, j:j+block_size]
+            block_angle = gradient_angle[i:i+block_size, j:j+block_size]
+            
+            # Compute the summary (e.g., mean) for the block
+            block_grad_summary = np.mean(block_magnitude)  # You can use np.max or another statistic
+            block_angle_summary = np.mean(block_angle)     # Mean angle for the block
+            
+            # Store the summarized values for each block
+            block_gradients.append(block_grad_summary)
+            block_angles.append(block_angle_summary)
+    
+    # Convert the lists to numpy arrays (reshape to match image layout)
+    height, width = grayscale_image.shape
+    block_gradients = np.array(block_gradients).reshape(height // block_size, width // block_size)
+    block_angles = np.array(block_angles).reshape(height // block_size, width // block_size)
+    
+    return block_gradients, block_angles
 
-def save_image(image: np.ndarray, name: str, upscale_factor: int = 1) -> None:
+
+def save_image(image: np.ndarray, name: str, upscale_factor: int = 1, gamma: float = 0.6, normalise: bool = True) -> None:
     """
     Save an image after normalizing it to the range 0-255.
     
     Optionally upscale the image by a given factor.
     
     Parameters:
-    - image: np.ndarray, the input image array.
+    - image: np.ndarray, the input image array (can be 2D or 3D).
     - name: str, the name of the saved image file.
     - upscale_factor: int, the factor by which to upscale the image (default is 1, no upscaling).
+    - gamma: float, the gamma correction value (default is 0.6).
+    - normalise: bool, whether to normalize the image (default is True).
     """
-    # Normalize the image to the range 0-255 if it's not already in that range
-    if np.max(image) != 0:  # Avoid division by zero if the max value is 0
-        image = (image - np.min(image)) / (np.max(image) - np.min(image)) * 255
-        image = image.astype(np.uint8)  # Convert to uint8 after normalization
+    # If the image is 3D (multiple layers), normalize each layer separately and hstack the layers
+    if len(image.shape) == 3:
+        layers = []
+        for layer in range(image.shape[2]):
+            single_layer = image[:, :, layer]
+            if np.max(single_layer) != 0 and normalise:
+                single_layer = (single_layer - np.min(single_layer)) / (np.max(single_layer) - np.min(single_layer)) * 255
+            single_layer = apply_gamma_correction(single_layer.astype(np.uint8), gamma)
+            layers.append(single_layer)
+        
+        # Stack layers horizontally (hstack) to save as a single image
+        image = np.hstack(layers)
+    
+    # If the image is 2D, just normalize and apply gamma correction
+    else:
+        if np.max(image) != 0 and normalise:  # Avoid division by zero if the max value is 0
+            image = (image - np.min(image)) / (np.max(image) - np.min(image)) * 255
+        image = apply_gamma_correction(image.astype(np.uint8), gamma)
 
     # Convert the normalized array to a PIL image
     image = Image.fromarray(np.squeeze(image), mode="L")
+
 
     # Upscale the image if upscale_factor is greater than 1
     if upscale_factor > 1:
@@ -50,6 +115,25 @@ def save_image(image: np.ndarray, name: str, upscale_factor: int = 1) -> None:
     # Save the image
     image_path = f"{name}.png"
     image.save(image_path)
+
+def apply_gamma_correction(image: np.ndarray, gamma: int):
+    """
+    Apply gamma correction to brighten or darken the image, < 1 makes dark regions lighter
+    """
+    # Check if the gamma value is valid (it should be positive)
+    if gamma <= 0:
+        raise ValueError("Gamma value must be greater than 0.")
+
+    # Step 1: Normalize the image to the range [0, 1]
+    normalized_image = image / 255.0
+    
+    # Step 2: Apply gamma correction
+    corrected_image = np.power(normalized_image, gamma)
+    
+    # Step 3: Rescale back to [0, 255] and convert to unsigned 8-bit integer
+    corrected_image = np.uint8(corrected_image * 255)
+    
+    return corrected_image
 
 
 def create_black_image(height):
@@ -87,9 +171,15 @@ def load_rgb_image(filepath) -> np.ndarray:
 def process_and_save_image(image: np.ndarray, image_name, bin_size):
     """Generate patch hash and save the image and its hash."""
     image_patch_hash = patch_hash(image, bin_size, patch_size=4, height=image.shape[0], width=image.shape[1])
+    gradient, angle  = gradient_blocks_hash(image, block_size=8)
+    combined_gradient = np.stack((gradient, angle), axis=-1)
+    # combined_gradient = np.stack((gradient), axis=-1)
     # np.savetxt(f"{image_name}.txt", np.squeeze(image_patch_hash), fmt="%d")
-    save_image(image, image_name)
-    save_image(image_patch_hash, f"{image_name}_patch_hash", upscale_factor=8)
+    # save_image(image, image_name)
+    # save_image(image_patch_hash, f"{image_name}_patch_hash", upscale_factor=8)
+    # save_image(angle, f"{image_name}_angle_hash", upscale_factor=8, gamma=1)
+    save_image(gradient, f"{image_name}_gradient_hash", upscale_factor=8, gamma=1)
+    save_image(combined_gradient, f"{image_name}_combined_gradient_angle_hash", upscale_factor=8, gamma=1)
 
 def create_random_noise_image(height, width, noise_range=(0, 255)):
     """
@@ -167,6 +257,10 @@ if __name__ == "__main__":
     # Load a camera frame
     camera_image = load_rgb_image("frame_0016.png")
     process_and_save_image(camera_image, "frame_0016_", BIN_SIZE)
+
+    # Load a camera frame
+    camera_image = load_rgb_image("frame_0015.png")
+    process_and_save_image(camera_image, "frame_0015_", BIN_SIZE)
 
     # IRL image of a home
     camera_image = load_rgb_image("home.jpg")

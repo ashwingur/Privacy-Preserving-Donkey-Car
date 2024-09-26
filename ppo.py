@@ -137,8 +137,8 @@ if __name__ == "__main__":
 
     env_id = f"{args.env_name}{'_privacy' if args.privacy else ''}"
 
-    IMAGE_WIDTH = 256
-    IMAGE_HEIGHT = 256
+    IMAGE_WIDTH = 512
+    IMAGE_HEIGHT = 512
 
 
     conf = {
@@ -147,7 +147,7 @@ if __name__ == "__main__":
         "port": args.port,
         "body_style": "donkey",
         "body_rgb": (128, 128, 128),
-        "car_name": "very fast car",
+        "car_name": "car",
         "font_size": 50,
         "racer_name": "PPO",
         "country": "USA",

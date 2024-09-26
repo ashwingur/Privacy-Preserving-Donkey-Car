@@ -21,6 +21,7 @@ from gym.utils import seeding
 
 from gym_donkeycar.envs.donkey_proc import DonkeyUnityProcess
 from gym_donkeycar.envs.donkey_sim import DonkeyUnitySimContoller
+from scipy import ndimage
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
@@ -175,15 +176,47 @@ class DonkeyEnv(gym.Env):
         image_path = f"frames/frame_{id:04d}.png"
         image.save(image_path)
         self.images_array.append(image_path)
-    
-    def save_privacy_frame(self, privacy_observation: np.ndarray, id: int):
-        # Convert the observation (which is a NumPy array) to an image
-            # Normalize the image to the range 0-255 if it's not already in that range
-        if np.max(privacy_observation) != 0:  # Avoid division by zero if the max value is 0
-            privacy_observation = (privacy_observation - np.min(privacy_observation)) / (np.max(privacy_observation) - np.min(privacy_observation)) * 255
-            privacy_observation = privacy_observation.astype(np.uint8)  # Convert to uint8 after normalization
 
-        image = Image.fromarray(np.squeeze(privacy_observation*1), mode="L")
+    def apply_gamma_correction(self, image: np.ndarray, gamma: int):
+        """
+        Apply gamma correction to brighten or darken the image, < 1 makes dark regions lighter
+        """
+        # Check if the gamma value is valid (it should be positive)
+        if gamma <= 0:
+            raise ValueError("Gamma value must be greater than 0.")
+
+        # Step 1: Normalize the image to the range [0, 1]
+        normalized_image = image / 255.0
+        
+        # Step 2: Apply gamma correction
+        corrected_image = np.power(normalized_image, gamma)
+        
+        # Step 3: Rescale back to [0, 255] and convert to unsigned 8-bit integer
+        corrected_image = np.uint8(corrected_image * 255)
+        
+        return corrected_image
+
+    def save_privacy_frame(self, image: np.ndarray, id: int):
+        # Convert the observation (which is a NumPy array) to an image
+        # Normalize the image to the range 0-255 if it's not already in that range
+        gamma = 1
+        normalise = True
+        if len(image.shape) == 3:
+            layers = []
+            for layer in range(image.shape[2]):
+                single_layer = image[:, :, layer]
+                if np.max(single_layer) != 0 and normalise:
+                    single_layer = (single_layer - np.min(single_layer)) / (np.max(single_layer) - np.min(single_layer)) * 255
+                single_layer = self.apply_gamma_correction(single_layer.astype(np.uint8), gamma)
+                layers.append(single_layer)
+            # Stack layers horizontally (hstack) to save as a single image
+            image = np.hstack(layers)
+        # If the image is 2D, just normalize
+        else:
+            if np.max(image) != 0 and normalise:  # Avoid division by zero if the max value is 0
+                image = (image - np.min(image)) / (np.max(image) - np.min(image)) * 255
+            image = self.apply_gamma_correction(image.astype(np.uint8), gamma)
+        image = Image.fromarray(np.squeeze(image*1), mode="L")
         image_path = f"privacy_frames/frame_{id:04d}.png"
         image.save(image_path)
         self.privacy_images_array.append(image_path)
@@ -218,13 +251,70 @@ class DonkeyEnv(gym.Env):
         print(f"Video saved as {video_name}")
 
 
+    # def get_privacy_observation_space(self) -> spaces.Box:
+    #     return spaces.Box(0, 255, (256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
+
     def get_privacy_observation_space(self) -> spaces.Box:
-        return spaces.Box(0, 255, (256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
+        # Greyscale test
+        return spaces.Box(0, 255, (64, 64, 2), dtype=np.uint8)
+    
+    def observation_to_privacy_observation(self, observation: np.ndarray, samples=3000) -> np.ndarray:
+        gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
+        gray_image = np.expand_dims(gray_image.astype(np.uint8), axis=-1)
+        
+        return self.gradient_blocks_hash(gray_image, block_size=8)
+
+    def gradient_blocks_hash(self, grayscale_image: np.ndarray, block_size: int = 8):
+        """
+        Compute the gradient magnitude and angle in each block of the image.
+        
+        Parameters:
+        - grayscale_image: np.ndarray, the grayscale version of the image.
+        - block_size: int, the size of the blocks (default is 4x4).
+        
+        Returns:
+        - block_gradients: np.ndarray, the summarized gradient magnitudes for each block.
+        - block_angles: np.ndarray, the summarized gradient angles for each block.
+        """
+        
+        # Compute the gradient in the x and y directions using Sobel operator
+        sobel_x = ndimage.sobel(grayscale_image, axis=0)  # Gradient in the x-direction
+        sobel_y = ndimage.sobel(grayscale_image, axis=1)  # Gradient in the y-direction
+        
+        # Compute the gradient magnitude and angle
+        gradient_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+        gradient_angle = np.arctan2(sobel_y, sobel_x)  # Gradient angle in radians
+        
+        # Initialize lists to store block-level gradient summaries
+        block_gradients = []
+        block_angles = []
+        
+        # Split the image into blocks and compute the summary of each block
+        for i in range(0, grayscale_image.shape[0], block_size):
+            for j in range(0, grayscale_image.shape[1], block_size):
+                # Extract the block for magnitude and angle
+                block_magnitude = gradient_magnitude[i:i+block_size, j:j+block_size]
+                block_angle = gradient_angle[i:i+block_size, j:j+block_size]
+                
+                # Compute the summary (e.g., mean) for the block
+                block_grad_summary = np.mean(block_magnitude)  # You can use np.max or another statistic
+                block_angle_summary = np.mean(block_angle)     # Mean angle for the block
+                
+                # Store the summarized values for each block
+                block_gradients.append(block_grad_summary)
+                block_angles.append(block_angle_summary)
+        
+        # Convert the lists to numpy arrays (reshape to match image layout)
+        height, width, depth = grayscale_image.shape
+        block_gradients = np.array(block_gradients).reshape(height // block_size, width // block_size)
+        block_angles = np.array(block_angles).reshape(height // block_size, width // block_size)
+        
+        # return block_gradients, block_angles
+        # return block_angles
+        # return block_gradients
+        return np.stack((block_gradients, block_angles), axis=-1)
     
 
-    # def get_privacy_observation_space(self) -> spaces.Box:
-    #     # Greyscale test
-    #     return spaces.Box(0, 255, (256, 256, 1), dtype=np.uint8)
     
     # def observation_to_privacy_observation(self, observation: np.ndarray, samples=3000) -> np.ndarray:
     #     """
@@ -267,39 +357,28 @@ class DonkeyEnv(gym.Env):
 
     #     return image_hash
     
-    def observation_to_privacy_observation(self, observation: np.ndarray) -> np.ndarray:
-        """
-        Privacy hash function where we get the min and max value in every patch
-        """
-        length = 256
-        patch_size = 8
-        image_hash = np.zeros((length//self.bin_size, length//self.bin_size, 1), dtype=np.uint16)
+    # def observation_to_privacy_observation(self, observation: np.ndarray) -> np.ndarray:
+    #     """
+    #     Privacy hash function where we get the min and max value in every patch
+    #     """
+    #     length = 256
+    #     patch_size = 8
+    #     image_hash = np.zeros((length//self.bin_size, length//self.bin_size, 1), dtype=np.uint16)
 
-        # Convert observation to grayscale
-        gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
-        gray_image = gray_image.astype(np.uint8)
-        # 64 for 256px image
-        reshaped_array = gray_image.reshape(length//patch_size, patch_size, length//patch_size, patch_size)
+    #     # Convert observation to grayscale
+    #     gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
+    #     gray_image = gray_image.astype(np.uint8)
+    #     # 64 for 256px image
+    #     reshaped_array = gray_image.reshape(length//patch_size, patch_size, length//patch_size, patch_size)
 
-        min_values = reshaped_array.min(axis=(1, 3)) // self.bin_size
-        max_values = reshaped_array.max(axis=(1, 3)) // self.bin_size
+    #     min_values = reshaped_array.min(axis=(1, 3)) // self.bin_size
+    #     max_values = reshaped_array.max(axis=(1, 3)) // self.bin_size
 
-        # np.set_printoptions(threshold=np.inf)
-        # print(min_values)
-        # np.savetxt('min.txt', min_values, fmt='%d')  # '%d' for integers, adjust formatting as needed
-        # np.savetxt('max.txt', max_values, fmt='%d')  # '%d' for integers, adjust formatting as needed
+    #     for min_val, max_val in zip(min_values.ravel(), max_values.ravel()):
+    #         image_hash[min_val, max_val] += 1
 
-        # print(max_values)
-        # print()
-        # exit()
 
-        for min_val, max_val in zip(min_values.ravel(), max_values.ravel()):
-            image_hash[min_val, max_val] += 1
-        
-        # for pixel in np.nditer(gray_image):
-        #     image_hash[pixel//self.bin_size, pixel//self.bin_size] += 1
-
-        return image_hash
+    #     return image_hash
 
     def generate_circular_points(self, img_width, img_height, min_radius, max_radius, num_points=100):
         """
