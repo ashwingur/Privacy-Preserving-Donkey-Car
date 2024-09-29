@@ -255,14 +255,58 @@ class DonkeyEnv(gym.Env):
     #     return spaces.Box(0, 255, (256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint8)
 
     def get_privacy_observation_space(self) -> spaces.Box:
-        # Greyscale test
+        # Changed based on the output of the hash function
         return spaces.Box(0, 255, (64, 64, 2), dtype=np.uint8)
     
-    def observation_to_privacy_observation(self, observation: np.ndarray, samples=3000) -> np.ndarray:
+    def observation_to_privacy_observation(self, observation: np.ndarray) -> np.ndarray:
         gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
         gray_image = np.expand_dims(gray_image.astype(np.uint8), axis=-1)
+
+        return self.line_min_max_hash(gray_image, segment_size=16, bin_size=self.bin_size)
+
+        # Gradient hash
         
-        return self.gradient_blocks_hash(gray_image, block_size=8)
+        # return self.gradient_blocks_hash(gray_image, block_size=8)
+    
+    def line_min_max_hash(self, image: np.ndarray, segment_size: int, bin_size: int) -> np.ndarray:
+        """
+        Optimized function to find the min and max of horizontal and vertical segments of a given size 
+        in a grayscale image, bins the values by bin_size, and increments the value at the (min, max) 
+        coordinate in separate hash arrays.
+        
+        :param image: 2D numpy array of grayscale image
+        :param segment_size: Number of pixels in each segment (horizontal or vertical)
+        :param bin_size: The bin size to reduce the granularity of grayscale values
+        :return: 3D numpy array with two stacked hash arrays: one for horizontal and one for vertical segments
+        """
+        # Calculate the size of the hash arrays based on the bin size
+        hash_size = 256 // bin_size
+        hash_array_horizontal = np.zeros((hash_size, hash_size), dtype=np.uint16)
+        hash_array_vertical = np.zeros((hash_size, hash_size), dtype=np.uint16)
+        
+        # Process horizontal segments in one go using NumPy's vectorization
+        # Reshape each row into chunks of `segment_size` for fast min/max computation
+        reshaped_image = image.reshape(image.shape[0], image.shape[1] // segment_size, segment_size)
+        min_vals = reshaped_image.min(axis=2) // bin_size  # Compute min values per segment
+        max_vals = reshaped_image.max(axis=2) // bin_size  # Compute max values per segment
+
+        # Loop through the min/max values and update the hash array
+        for min_val, max_val in zip(min_vals.ravel(), max_vals.ravel()):
+            hash_array_horizontal[min_val, max_val] += 1
+
+        # Process vertical segments by transposing the image and repeating the same steps
+        reshaped_image_transposed = image.T.reshape(image.shape[1], image.shape[0] // segment_size, segment_size)
+        min_vals_vertical = reshaped_image_transposed.min(axis=2) // bin_size  # Compute min values per segment
+        max_vals_vertical = reshaped_image_transposed.max(axis=2) // bin_size  # Compute max values per segment
+
+        # Loop through the vertical min/max values and update the hash array
+        for min_val, max_val in zip(min_vals_vertical.ravel(), max_vals_vertical.ravel()):
+            hash_array_vertical[min_val, max_val] += 1
+
+        # Stack the two hash arrays along a new axis (depth) to create a 3D array
+        stacked_hash_arrays = np.stack([hash_array_horizontal, hash_array_vertical], axis=-1)
+
+        return stacked_hash_arrays
 
     def gradient_blocks_hash(self, grayscale_image: np.ndarray, block_size: int = 8):
         """

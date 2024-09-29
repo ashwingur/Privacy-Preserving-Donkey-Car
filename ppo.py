@@ -139,6 +139,7 @@ if __name__ == "__main__":
 
     IMAGE_WIDTH = 512
     IMAGE_HEIGHT = 512
+    TOTAL_STEPS = 50000
 
 
     conf = {
@@ -154,9 +155,9 @@ if __name__ == "__main__":
         "bio": "Learning to drive w PPO RL",
         "guid": str(uuid.uuid4()),
         "max_cte": 10,
-        "steer_limit": 0.5,
+        "steer_limit": 0.4,
         "throttle_min": 0.2,
-        "throttle_max": 0.3,
+        "throttle_max": 0.2,
         "privacy": args.privacy, # Indicate whether privacy hashing is enabled
         "record": args.record, # If we should be recording the frames (to view the observations)
         # Modify the camera resolution
@@ -211,7 +212,7 @@ if __name__ == "__main__":
 
         # set up model in learning mode with goal number of timesteps to complete
         try:
-            model.learn(total_timesteps=55000, tb_log_name=args.log_name)
+            model.learn(total_timesteps=TOTAL_STEPS, tb_log_name=args.log_name)
         except KeyboardInterrupt:
             if args.record:
                 images = sorted([f"frames/{f}" for f in os.listdir("frames") if os.path.isfile(os.path.join("frames", f))])

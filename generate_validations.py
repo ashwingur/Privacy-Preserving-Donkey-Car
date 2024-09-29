@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 import noise
 from scipy import ndimage
+import time
 
 def patch_hash(image: np.ndarray, bin_size: int, height: int, width: int, patch_size: int) -> np.ndarray:
     """
@@ -21,6 +22,46 @@ def patch_hash(image: np.ndarray, bin_size: int, height: int, width: int, patch_
         image_hash[min_val, max_val] = min(image_hash[min_val, max_val] + 1, 255)
 
     return image_hash
+
+def line_min_max_hash(image: np.ndarray, segment_size: int, bin_size: int) -> np.ndarray:
+    """
+    Optimized function to find the min and max of horizontal and vertical segments of a given size 
+    in a grayscale image, bins the values by bin_size, and increments the value at the (min, max) 
+    coordinate in separate hash arrays.
+    
+    :param image: 2D numpy array of grayscale image
+    :param segment_size: Number of pixels in each segment (horizontal or vertical)
+    :param bin_size: The bin size to reduce the granularity of grayscale values
+    :return: 3D numpy array with two stacked hash arrays: one for horizontal and one for vertical segments
+    """
+    # Calculate the size of the hash arrays based on the bin size
+    hash_size = 256 // bin_size
+    hash_array_horizontal = np.zeros((hash_size, hash_size), dtype=np.uint16)
+    hash_array_vertical = np.zeros((hash_size, hash_size), dtype=np.uint16)
+    
+    # Process horizontal segments in one go using NumPy's vectorization
+    # Reshape each row into chunks of `segment_size` for fast min/max computation
+    reshaped_image = image.reshape(image.shape[0], image.shape[1] // segment_size, segment_size)
+    min_vals = reshaped_image.min(axis=2) // bin_size  # Compute min values per segment
+    max_vals = reshaped_image.max(axis=2) // bin_size  # Compute max values per segment
+
+    # Loop through the min/max values and update the hash array
+    for min_val, max_val in zip(min_vals.ravel(), max_vals.ravel()):
+        hash_array_horizontal[min_val, max_val] += 1
+
+    # Process vertical segments by transposing the image and repeating the same steps
+    reshaped_image_transposed = image.T.reshape(image.shape[1], image.shape[0] // segment_size, segment_size)
+    min_vals_vertical = reshaped_image_transposed.min(axis=2) // bin_size  # Compute min values per segment
+    max_vals_vertical = reshaped_image_transposed.max(axis=2) // bin_size  # Compute max values per segment
+
+    # Loop through the vertical min/max values and update the hash array
+    for min_val, max_val in zip(min_vals_vertical.ravel(), max_vals_vertical.ravel()):
+        hash_array_vertical[min_val, max_val] += 1
+
+    # Stack the two hash arrays along a new axis (depth) to create a 3D array
+    stacked_hash_arrays = np.stack([hash_array_horizontal, hash_array_vertical], axis=-1)
+
+    return stacked_hash_arrays
 
 def gradient_blocks_hash(grayscale_image: np.ndarray, block_size: int = 8):
     """
@@ -173,13 +214,19 @@ def process_and_save_image(image: np.ndarray, image_name, bin_size):
     image_patch_hash = patch_hash(image, bin_size, patch_size=4, height=image.shape[0], width=image.shape[1])
     gradient, angle  = gradient_blocks_hash(image, block_size=8)
     combined_gradient = np.stack((gradient, angle), axis=-1)
-    # combined_gradient = np.stack((gradient), axis=-1)
-    # np.savetxt(f"{image_name}.txt", np.squeeze(image_patch_hash), fmt="%d")
-    # save_image(image, image_name)
-    # save_image(image_patch_hash, f"{image_name}_patch_hash", upscale_factor=8)
-    # save_image(angle, f"{image_name}_angle_hash", upscale_factor=8, gamma=1)
+    start_time = time.time()
+    line_hash = line_min_max_hash(image, segment_size=16, bin_size=bin_size)
+    end_time = time.time()
+
+    elapsed_time = end_time - start_time
+    print(f"Function took {elapsed_time:.4f} seconds")
+
+    save_image(image, image_name)
+    save_image(image_patch_hash, f"{image_name}_patch_hash", upscale_factor=8)
+    save_image(angle, f"{image_name}_angle_hash", upscale_factor=8, gamma=1)
     save_image(gradient, f"{image_name}_gradient_hash", upscale_factor=8, gamma=1)
     save_image(combined_gradient, f"{image_name}_combined_gradient_angle_hash", upscale_factor=8, gamma=1)
+    save_image(line_hash, f"{image_name}_line_hash", upscale_factor=8, gamma=0.7)
 
 def create_random_noise_image(height, width, noise_range=(0, 255)):
     """

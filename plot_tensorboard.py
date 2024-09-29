@@ -3,29 +3,40 @@ import csv
 import os
 import matplotlib.pyplot as plt
 from collections import defaultdict
-import sys
 
-def main(folder_path: str):
-    # Prepare a dictionary to store data by step
-    data_dict = defaultdict(lambda: {'Wall Time': None, 'Step': None})
+def main(file_name_tuples: list, folder_path: str):
+    '''
+    :param file_name_tuples: List of tuples with display names and file paths
+    :param folder_path: Folder to save the plots to
+    '''
+    
+    # Prepare a dictionary to store data by step for each file
+    data_dicts = []
+    
+    for display_name, file_path in file_name_tuples:
+        # Prepare a dictionary for this file's data
+        data_dict = defaultdict(lambda: {'Wall Time': None, 'Step': None})
+        
+        # Iterate through the summary events and extract required data
+        for e in tf.compat.v1.train.summary_iterator(file_path):
+            wall_time = e.wall_time
+            step = e.step
+            for v in e.summary.value:
+                tag = v.tag
+                simple_value = v.simple_value
 
-    # Iterate through the summary events and extract required data
-    for e in tf.compat.v1.train.summary_iterator("log/donkey-warren-track-v0_privacy/4x4_quadrant_minmax_2/events.out.tfevents.1725530113.ashwin.46278.0"):
-        wall_time = e.wall_time
-        step = e.step
-        for v in e.summary.value:
-            tag = v.tag
-            simple_value = v.simple_value
+                # Store data in the dictionary
+                data_dict[step]['Wall Time'] = wall_time
+                data_dict[step]['Step'] = step
+                data_dict[step][tag] = simple_value
 
-            # Store data in the dictionary
-            data_dict[step]['Wall Time'] = wall_time
-            data_dict[step]['Step'] = step
-            data_dict[step][tag] = simple_value
+        data_dicts.append((data_dict, display_name))
 
-    # Extract all unique tags for the headers
+    # Extract all unique tags for the headers across all files
     all_tags = set()
-    for step_data in data_dict.values():
-        all_tags.update(step_data.keys())
+    for data_dict, _ in data_dicts:
+        for step_data in data_dict.values():
+            all_tags.update(step_data.keys())
 
     # Convert the set of tags to a sorted list
     all_tags = sorted(all_tags)
@@ -42,71 +53,55 @@ def main(folder_path: str):
         writer = csv.DictWriter(file, fieldnames=all_tags)
         # Write the header
         writer.writeheader()
-        # Write the data rows
-        for step, step_data in sorted(data_dict.items()):
-            writer.writerow(step_data)
+        # Write the data rows for each file
+        for data_dict, display_name in data_dicts:
+            for step, step_data in sorted(data_dict.items()):
+                writer.writerow(step_data)
 
     print(f"Data has been successfully saved to {csv_file_path}")
 
-
-    # Prepare the figure for subplots
-    num_plots = len(all_tags) - 2  # Excluding 'Wall Time' and 'Step'
-    num_columns = 2  # Set number of columns to 2
-    num_rows = (num_plots + 1) // num_columns  # Calculate the number of rows needed
-
-    fig, axs = plt.subplots(num_rows, num_columns, figsize=(15, num_rows * 4))
-    axs = axs.flatten()  # Flatten the array of axes for easy iteration
-
-    # Index for subplots
-    plot_index = 0
-
-    # Generate and save a plot for each unique tag
+    # Generate and save individual plots for each unique tag
     for tag in all_tags:
         if tag not in ['Wall Time', 'Step']:
-            steps = []
-            values = []
+            plt.figure(figsize=(10, 6))
+            
+            # Plot the data for each file
+            for data_dict, display_name in data_dicts:
+                steps = []
+                values = []
+                for step_data in data_dict.values():
+                    if tag in step_data:
+                        steps.append(step_data['Step'])
+                        values.append(step_data[tag])
 
-            for step_data in data_dict.values():
-                if tag in step_data:
-                    steps.append(step_data['Step'])
-                    values.append(step_data[tag])
-
-            # Save each plot individually
-            plt.figure()
-            plt.plot(steps, values, label=tag)
+                plt.plot(steps, values, label=display_name)
+            
             plt.xlabel('Step')
             plt.ylabel('Value')
-            # plt.title(f'{tag} over Steps')
+            plt.title(f'{tag} over Steps')
             plt.legend()
 
-            # Save the plot as a PNG file
-            plot_file_path = os.path.join(folder_path, f"{tag.replace('/', '_')}.png")
-            plt.savefig(plot_file_path)
-            # Save as an EPS file
-            plot_file_path = os.path.join(folder_path, f"{tag.replace('/', '_')}.eps")
-            plt.savefig(plot_file_path, format='eps')
+            # Save each plot individually as PNG and EPS
+            plot_file_name = tag.replace('/', '_')
+            png_path = os.path.join(folder_path, f"{plot_file_name}.png")
+            eps_path = os.path.join(folder_path, f"{plot_file_name}.eps")
+
+            plt.savefig(png_path)
+            plt.savefig(eps_path, format='eps')
             plt.close()
 
-            # Add to subplot for combined image
-            axs[plot_index].plot(steps, values, label=tag)
-            axs[plot_index].set_xlabel('Step')
-            axs[plot_index].set_ylabel('Value')
-            axs[plot_index].set_title(f'{tag} over Steps')
-            axs[plot_index].legend()
+            print(f"Plot for '{tag}' saved as PNG and EPS.")
 
-            plot_index += 1
+    print(f"All individual plots have been successfully saved in the folder: {folder_path}")
 
-    # Adjust layout and save the combined subplot figure
-    plt.tight_layout()
-    combined_plot_path = os.path.join(folder_path, 'combined_plot.png')
-    fig.savefig(combined_plot_path)
-    plt.close(fig)
-
-    print(f"Individual plots and combined subplot have been successfully saved in the folder: {folder_path}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python script_name.py <folder_path>")
-    else:
-        folder_path = sys.argv[1]
-        main(folder_path)
+    # Hardcoded list of tuples with display names and file paths
+    file_name_tuples = [
+        # ("Run 1", "log/donkey-warren-track-v0_privacy/4x4_quadrant_minmax_2/events.out.tfevents.1725530113.ashwin.46278.0"),
+        ("Run 2", "log/donkey-warren-track-v0_privacy/greyscale_5/events.out.tfevents.1726719515.ashwin.28795.0"),
+        ("Patch Hash", "log/donkey-warren-track-v0_privacy/patch_hash_8x8_3/events.out.tfevents.1726731714.ashwin.38097.0")
+    ]
+    
+    folder_path = "plots"
+    main(file_name_tuples, folder_path)
