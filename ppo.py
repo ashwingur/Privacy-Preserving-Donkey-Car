@@ -40,7 +40,7 @@ def save_frame(observation, id: int, images_array):
     images_array.append(image_path)
 
 
-def generate_mp4_video(images_array, video_name='output_video.mp4', fps=15, scale_factor=2):
+def generate_mp4_video(images_array, video_name='output_video.mp4', fps=15, scale_factor=3):
     """
     Create an MP4 video from a list of image file paths, upscaling each image using nearest-neighbor interpolation.
 
@@ -139,7 +139,8 @@ if __name__ == "__main__":
 
     IMAGE_WIDTH = 512
     IMAGE_HEIGHT = 512
-    TOTAL_STEPS = 50000
+    TOTAL_STEPS = 60000
+    TEST_STEPS = 150
 
 
     conf = {
@@ -181,7 +182,7 @@ if __name__ == "__main__":
         os.makedirs(image_folder, exist_ok=True)
 
         obs = env.reset()
-        for i in range(500):
+        for i in range(TEST_STEPS):
             # Display the observation
             # show_observation(obs)
 
