@@ -199,7 +199,7 @@ class DonkeyEnv(gym.Env):
     def save_privacy_frame(self, image: np.ndarray, id: int):
         # Convert the observation (which is a NumPy array) to an image
         # Normalize the image to the range 0-255 if it's not already in that range
-        gamma = 1
+        gamma = 0.5
         normalise = True
         if len(image.shape) == 3:
             layers = []
@@ -209,8 +209,13 @@ class DonkeyEnv(gym.Env):
                     single_layer = (single_layer - np.min(single_layer)) / (np.max(single_layer) - np.min(single_layer)) * 255
                 single_layer = self.apply_gamma_correction(single_layer.astype(np.uint8), gamma)
                 layers.append(single_layer)
-            # Stack layers horizontally (hstack) to save as a single image
-            image = np.hstack(layers)
+
+            # Split the layers into a 2 column grid, assuming its an even amount
+            # Stack horizontally (in pairs) first, then stack the results vertically
+            hstacked_pairs = [np.hstack(layers[i:i+2]) for i in range(0, len(layers), 2)]
+            # Now stack the pairs vertically
+            image = np.vstack(hstacked_pairs)
+
         # If the image is 2D, just normalize
         else:
             if np.max(image) != 0 and normalise:  # Avoid division by zero if the max value is 0
@@ -222,7 +227,7 @@ class DonkeyEnv(gym.Env):
         self.privacy_images_array.append(image_path)
 
     
-    def generate_mp4_video(images_array, video_name='output_video.mp4', fps=30, scale_factor=2):
+    def generate_mp4_video(images_array, video_name='output_video.mp4', fps=15, scale_factor=2):
         """
         Create an MP4 video from a list of image file paths, upscaling each image using nearest-neighbor interpolation.
 
@@ -256,13 +261,14 @@ class DonkeyEnv(gym.Env):
 
     def get_privacy_observation_space(self) -> spaces.Box:
         # Changed based on the output of the hash function
-        return spaces.Box(0, 255, (64, 64, 2), dtype=np.uint8)
+        return spaces.Box(0, 255, (64, 64, 8), dtype=np.uint8)
     
     def observation_to_privacy_observation(self, observation: np.ndarray) -> np.ndarray:
         gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
         gray_image = np.expand_dims(gray_image.astype(np.uint8), axis=-1)
 
-        return self.line_min_max_hash(gray_image, segment_size=16, bin_size=self.bin_size)
+        # return self.line_min_max_hash(gray_image, segment_size=16, bin_size=self.bin_size)
+        return self.line_min_max_hash_quadrants(gray_image, segment_size=16, bin_size=self.bin_size)
 
         # Gradient hash
         
@@ -305,6 +311,144 @@ class DonkeyEnv(gym.Env):
 
         # Stack the two hash arrays along a new axis (depth) to create a 3D array
         stacked_hash_arrays = np.stack([hash_array_horizontal, hash_array_vertical], axis=-1)
+
+        return stacked_hash_arrays
+    
+    def line_min_max_hash_split(self, image: np.ndarray, segment_size: int, bin_size: int) -> np.ndarray:
+        """
+        Optimized function to find the min and max of horizontal and vertical segments of a given size 
+        in a grayscale image, split into left and right halves. Bins the values by bin_size, and increments 
+        the value at the (min, max) coordinate in separate hash arrays for each half.
+        
+        :param image: 2D numpy array of grayscale image
+        :param segment_size: Number of pixels in each segment (horizontal or vertical)
+        :param bin_size: The bin size to reduce the granularity of grayscale values
+        :return: 3D numpy array with four stacked hash arrays: two for horizontal and two for vertical segments
+        """
+
+        # Split the image into left and right halves
+        mid_point = image.shape[1] // 2
+        left_half = image[:, :mid_point]
+        right_half = image[:, mid_point:]
+
+        # Initialize four hash arrays for left and right halves, both horizontal and vertical
+        hash_size = 256 // bin_size
+        hash_array_left_horizontal = np.zeros((hash_size, hash_size), dtype=np.uint16)
+        hash_array_left_vertical = np.zeros((hash_size, hash_size), dtype=np.uint16)
+        hash_array_right_horizontal = np.zeros((hash_size, hash_size), dtype=np.uint16)
+        hash_array_right_vertical = np.zeros((hash_size, hash_size), dtype=np.uint16)
+
+        # Helper function to process each half and update hash arrays
+        def process_half(half_image, hash_array_horizontal, hash_array_vertical):
+            # Process horizontal segments in one go using NumPy's vectorization
+            reshaped_image = half_image.reshape(half_image.shape[0], half_image.shape[1] // segment_size, segment_size)
+            min_vals = reshaped_image.min(axis=2) // bin_size  # Compute min values per segment
+            max_vals = reshaped_image.max(axis=2) // bin_size  # Compute max values per segment
+
+            # Update horizontal hash array
+            for min_val, max_val in zip(min_vals.ravel(), max_vals.ravel()):
+                hash_array_horizontal[min_val, max_val] += 1
+
+            # Process vertical segments by transposing the image and repeating the same steps
+            reshaped_image_transposed = half_image.T.reshape(half_image.shape[1], half_image.shape[0] // segment_size, segment_size)
+            min_vals_vertical = reshaped_image_transposed.min(axis=2) // bin_size  # Compute min values per segment
+            max_vals_vertical = reshaped_image_transposed.max(axis=2) // bin_size  # Compute max values per segment
+
+            # Update vertical hash array
+            for min_val, max_val in zip(min_vals_vertical.ravel(), max_vals_vertical.ravel()):
+                hash_array_vertical[min_val, max_val] += 1
+
+        # Process left half
+        process_half(left_half, hash_array_left_horizontal, hash_array_left_vertical)
+
+        # Process right half
+        process_half(right_half, hash_array_right_horizontal, hash_array_right_vertical)
+
+        # Stack the four hash arrays along a new axis (depth) to create a 3D array with 4 channels
+        stacked_hash_arrays = np.stack([
+            hash_array_left_horizontal,  # Left half horizontal
+            hash_array_left_vertical,    # Left half vertical
+            hash_array_right_horizontal, # Right half horizontal
+            hash_array_right_vertical    # Right half vertical
+        ], axis=-1)
+
+        return stacked_hash_arrays
+
+    def line_min_max_hash_quadrants(self, image: np.ndarray, segment_size: int, bin_size: int) -> np.ndarray:
+        """
+        Optimized function to find the min and max of horizontal and vertical segments of a given size 
+        in a grayscale image, split into four quadrants (top-left, top-right, bottom-left, bottom-right).
+        Bins the values by bin_size and increments the value at the (min, max) coordinate in separate
+        hash arrays for each quadrant.
+        
+        :param image: 2D numpy array of grayscale image
+        :param segment_size: Number of pixels in each segment (horizontal or vertical)
+        :param bin_size: The bin size to reduce the granularity of grayscale values
+        :return: 3D numpy array with eight stacked hash arrays: two for each quadrant (horizontal and vertical)
+        """
+
+        # Calculate the midpoint of the image to split into quadrants
+        mid_row = image.shape[0] // 2
+        mid_col = image.shape[1] // 2
+
+        # Split the image into four quadrants
+        top_left = image[:mid_row, :mid_col]
+        top_right = image[:mid_row, mid_col:]
+        bottom_left = image[mid_row:, :mid_col]
+        bottom_right = image[mid_row:, mid_col:]
+
+        # Initialize hash arrays for each quadrant (horizontal and vertical)
+        hash_size = 256 // bin_size
+        hash_arrays = {
+            'top_left_horizontal': np.zeros((hash_size, hash_size), dtype=np.uint16),
+            'top_left_vertical': np.zeros((hash_size, hash_size), dtype=np.uint16),
+            'top_right_horizontal': np.zeros((hash_size, hash_size), dtype=np.uint16),
+            'top_right_vertical': np.zeros((hash_size, hash_size), dtype=np.uint16),
+            'bottom_left_horizontal': np.zeros((hash_size, hash_size), dtype=np.uint16),
+            'bottom_left_vertical': np.zeros((hash_size, hash_size), dtype=np.uint16),
+            'bottom_right_horizontal': np.zeros((hash_size, hash_size), dtype=np.uint16),
+            'bottom_right_vertical': np.zeros((hash_size, hash_size), dtype=np.uint16),
+        }
+
+        # Helper function to process each quadrant and update the hash arrays
+        def process_quadrant(quadrant_image, hash_array_horizontal, hash_array_vertical):
+            # Process horizontal segments
+            reshaped_image = quadrant_image.reshape(
+                quadrant_image.shape[0], quadrant_image.shape[1] // segment_size, segment_size)
+            min_vals = reshaped_image.min(axis=2) // bin_size  # Compute min values per segment
+            max_vals = reshaped_image.max(axis=2) // bin_size  # Compute max values per segment
+
+            # Update horizontal hash array
+            for min_val, max_val in zip(min_vals.ravel(), max_vals.ravel()):
+                hash_array_horizontal[min_val, max_val] += 1
+
+            # Process vertical segments by transposing the image
+            reshaped_image_transposed = quadrant_image.T.reshape(
+                quadrant_image.shape[1], quadrant_image.shape[0] // segment_size, segment_size)
+            min_vals_vertical = reshaped_image_transposed.min(axis=2) // bin_size  # Compute min values per segment
+            max_vals_vertical = reshaped_image_transposed.max(axis=2) // bin_size  # Compute max values per segment
+
+            # Update vertical hash array
+            for min_val, max_val in zip(min_vals_vertical.ravel(), max_vals_vertical.ravel()):
+                hash_array_vertical[min_val, max_val] += 1
+
+        # Process each quadrant
+        process_quadrant(top_left, hash_arrays['top_left_horizontal'], hash_arrays['top_left_vertical'])
+        process_quadrant(top_right, hash_arrays['top_right_horizontal'], hash_arrays['top_right_vertical'])
+        process_quadrant(bottom_left, hash_arrays['bottom_left_horizontal'], hash_arrays['bottom_left_vertical'])
+        process_quadrant(bottom_right, hash_arrays['bottom_right_horizontal'], hash_arrays['bottom_right_vertical'])
+
+        # Stack the hash arrays along a new axis (depth) to create a 3D array with 8 layers
+        stacked_hash_arrays = np.stack([
+            hash_arrays['top_left_horizontal'],  # Top-left quadrant horizontal
+            hash_arrays['top_left_vertical'],    # Top-left quadrant vertical
+            hash_arrays['top_right_horizontal'], # Top-right quadrant horizontal
+            hash_arrays['top_right_vertical'],   # Top-right quadrant vertical
+            hash_arrays['bottom_left_horizontal'],# Bottom-left quadrant horizontal
+            hash_arrays['bottom_left_vertical'], # Bottom-left quadrant vertical
+            hash_arrays['bottom_right_horizontal'],# Bottom-right quadrant horizontal
+            hash_arrays['bottom_right_vertical'], # Bottom-right quadrant vertical
+        ], axis=-1)
 
         return stacked_hash_arrays
 
