@@ -158,6 +158,8 @@ class DonkeyEnv(gym.Env):
         plt.xlabel('X position (m)')
         plt.ylabel('Y position (m)')
 
+        plt.grid(True)
+
         plt.savefig(fig_name, format='png')
         print(f"XY data plotted and saved to {fig_name}")
 
@@ -261,17 +263,19 @@ class DonkeyEnv(gym.Env):
 
     def get_privacy_observation_space(self) -> spaces.Box:
         # Changed based on the output of the hash function
-        return spaces.Box(0, 255, (64, 64, 8), dtype=np.uint8)
+        return spaces.Box(0, 255, (256, 256, 1), dtype=np.uint8)
     
     def observation_to_privacy_observation(self, observation: np.ndarray) -> np.ndarray:
         gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
         gray_image = np.expand_dims(gray_image.astype(np.uint8), axis=-1)
 
+        return gray_image
+
         # return self.line_min_max_hash(gray_image, segment_size=16, bin_size=self.bin_size)
-        return self.line_min_max_hash_quadrants(gray_image, segment_size=16, bin_size=self.bin_size)
+        # return self.line_min_max_hash_split(gray_image, segment_size=16, bin_size=self.bin_size)
+        # return self.patch_hash(gray_image)
 
         # Gradient hash
-        
         # return self.gradient_blocks_hash(gray_image, block_size=8)
     
     def line_min_max_hash(self, image: np.ndarray, segment_size: int, bin_size: int) -> np.ndarray:
@@ -310,7 +314,9 @@ class DonkeyEnv(gym.Env):
             hash_array_vertical[min_val, max_val] += 1
 
         # Stack the two hash arrays along a new axis (depth) to create a 3D array
-        stacked_hash_arrays = np.stack([hash_array_horizontal, hash_array_vertical], axis=-1)
+        # stacked_hash_arrays = np.stack([hash_array_horizontal, hash_array_vertical], axis=-1)
+        # stacked_hash_arrays = np.stack([hash_array_horizontal], axis=-1)
+        return np.expand_dims(hash_array_horizontal, axis=-1)
 
         return stacked_hash_arrays
     
@@ -502,6 +508,25 @@ class DonkeyEnv(gym.Env):
         # return block_gradients
         return np.stack((block_gradients, block_angles), axis=-1)
     
+    def patch_hash(self, gray_image: np.ndarray) -> np.ndarray:
+        """
+        Privacy hash function where we get the min and max value in every patch
+        """
+        length = 512
+        patch_size = 8
+        image_hash = np.zeros((256//self.bin_size, 256//self.bin_size, 1), dtype=np.uint16)
+
+        # 64 for 256px image
+        reshaped_array = gray_image.reshape(length//patch_size, patch_size, length//patch_size, patch_size)
+
+        min_values = reshaped_array.min(axis=(1, 3)) // self.bin_size
+        max_values = reshaped_array.max(axis=(1, 3)) // self.bin_size
+
+        for min_val, max_val in zip(min_values.ravel(), max_values.ravel()):
+            image_hash[min_val, max_val] += 1
+
+
+        return image_hash
 
     
     # def observation_to_privacy_observation(self, observation: np.ndarray, samples=3000) -> np.ndarray:
@@ -545,28 +570,6 @@ class DonkeyEnv(gym.Env):
 
     #     return image_hash
     
-    # def observation_to_privacy_observation(self, observation: np.ndarray) -> np.ndarray:
-    #     """
-    #     Privacy hash function where we get the min and max value in every patch
-    #     """
-    #     length = 256
-    #     patch_size = 8
-    #     image_hash = np.zeros((length//self.bin_size, length//self.bin_size, 1), dtype=np.uint16)
-
-    #     # Convert observation to grayscale
-    #     gray_image = np.dot(observation[...,:3], [0.2989, 0.5870, 0.1140])
-    #     gray_image = gray_image.astype(np.uint8)
-    #     # 64 for 256px image
-    #     reshaped_array = gray_image.reshape(length//patch_size, patch_size, length//patch_size, patch_size)
-
-    #     min_values = reshaped_array.min(axis=(1, 3)) // self.bin_size
-    #     max_values = reshaped_array.max(axis=(1, 3)) // self.bin_size
-
-    #     for min_val, max_val in zip(min_values.ravel(), max_values.ravel()):
-    #         image_hash[min_val, max_val] += 1
-
-
-    #     return image_hash
 
     def generate_circular_points(self, img_width, img_height, min_radius, max_radius, num_points=100):
         """

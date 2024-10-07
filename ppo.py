@@ -40,7 +40,7 @@ def save_frame(observation, id: int, images_array):
     images_array.append(image_path)
 
 
-def generate_mp4_video(images_array, video_name='output_video.mp4', fps=15, scale_factor=3):
+def generate_mp4_video(images_array, video_name='output_video.mp4', fps=15, scale_factor=6):
     """
     Create an MP4 video from a list of image file paths, upscaling each image using nearest-neighbor interpolation.
 
@@ -137,10 +137,10 @@ if __name__ == "__main__":
 
     env_id = f"{args.env_name}{'_privacy' if args.privacy else ''}"
 
-    IMAGE_WIDTH = 512
-    IMAGE_HEIGHT = 512
-    TOTAL_STEPS = 60000
-    TEST_STEPS = 150
+    IMAGE_WIDTH = 256
+    IMAGE_HEIGHT = 256
+    TOTAL_STEPS = 75000
+    TEST_STEPS = 250
 
 
     conf = {
@@ -225,25 +225,25 @@ if __name__ == "__main__":
 
         obs = env.reset()
 
-        # We are not training in this loop, just testing
-        for i in range(200):
-            action, _states = model.predict(obs, deterministic=True)
-            # env.poop()
+        # # We are not training in this loop, just testing
+        # for i in range(200):
+        #     action, _states = model.predict(obs, deterministic=True)
+        #     # env.poop()
 
-            obs, reward, done, info = env.step(action)
+        #     obs, reward, done, info = env.step(action)
 
-            try:
-                env.render()
-            except Exception as e:
-                print(e)
-                print("failure in render, continuing...")
+        #     try:
+        #         env.render()
+        #     except Exception as e:
+        #         print(e)
+        #         print("failure in render, continuing...")
 
-            if done:
-                obs = env.reset()
+        #     if done:
+        #         obs = env.reset()
 
-            if i % 100 == 0:
-                print("saving...")
-                model.save(env_id)
+        #     if i % 100 == 0:
+        #         print("saving...")
+        #         model.save(env_id)
 
         # Save the agent
         model.save(env_id)
